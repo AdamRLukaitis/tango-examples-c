@@ -7,6 +7,7 @@
     <uses-sdk
         android:minSdkVersion="19"
         android:targetSdkVersion="19" />
+    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
     <application
         android:allowBackup="true"
@@ -19,7 +20,7 @@
         <activity
             android:label="@string/menu_name"
             android:name="com.projecttango.experiments.nativearealearning.StartActivity"
-            android:screenOrientation="landscape">
+            android:screenOrientation="nosensor">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -27,11 +28,11 @@
         </activity>
         <activity
             android:name="com.projecttango.experiments.nativearealearning.AreaDescriptionActivity"
-            android:screenOrientation="landscape">
+            android:screenOrientation="nosensor">
         </activity>
         <activity
             android:name="com.projecttango.experiments.nativearealearning.ADFUUIDListViewActivity"
-            android:screenOrientation="landscape">
+            android:screenOrientation="nosensor">
         </activity>
     </application>
 

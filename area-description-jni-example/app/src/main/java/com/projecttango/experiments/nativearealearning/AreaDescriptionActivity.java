@@ -20,25 +20,23 @@ import android.app.Activity;
 import android.app.FragmentManager;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.graphics.Point;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.view.Display;
 import android.view.MotionEvent;
 import android.view.View;
-import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ToggleButton;
 
 // The AreaDescriptionActivity of the application which shows debug information
 // and a glSurfaceView that renders graphic content.
 public class AreaDescriptionActivity extends Activity implements
-    View.OnClickListener, SetADFNameDialog.SetNameAndUUIDCommunicator {
-  // The user has not given permission to use Motion Tracking functionality.
-  private static final int TANGO_NO_MOTION_TRACKING_PERMISSION = -3;
+    View.OnClickListener, SetADFNameDialog.CallbackListener, SaveAdfTask.SaveAdfListener {
   // The input argument is invalid.
   private static final int  TANGO_INVALID = -2;
   // This error code denotes some sort of hard error occurred.
@@ -46,21 +44,22 @@ public class AreaDescriptionActivity extends Activity implements
   // This code indicates success.
   private static final int  TANGO_SUCCESS = 0;
 
+  // The minimum Tango Core version required from this application.
+  private static final int  MIN_TANGO_CORE_VERSION = 6804;
+
+  // The package name of Tang Core, used for checking minimum Tango Core version.
+  private static final String TANGO_PACKAGE_NAME = "com.projecttango.tango";
+
   // Tag for debug logging.
   private static final String TAG = AreaDescriptionActivity.class.getSimpleName();
-
-  // Permission request action.
-  private static final String REQUEST_PERMISSION_ACTION =
-      "android.intent.action.REQUEST_TANGO_PERMISSION";
-
-  // Key string for requesting and checking Motion Tracking permission.
-  private static final String MOTION_TRACKING_PERMISSION =
-      "MOTION_TRACKING_PERMISSION";
 
   // The interval at which we'll update our UI debug text in milliseconds.
   // This is the rate at which we query our native wrapper around the tango
   // service for pose and event information.
-  private static final int kUpdateIntervalMs = 100;
+  private static final int UPDATE_UI_INTERVAL_MS = 100;
+
+  // The flag to check if the surface is created.
+  public boolean mIsSurfaceCreated = false;
 
   // Debug information text.
   // Current frame's pose information.
@@ -81,10 +80,10 @@ public class AreaDescriptionActivity extends Activity implements
   private Renderer mRenderer;
   private GLSurfaceView mGLView;
 
-  // Flag that controls wether user wants to run area learning mode.
+  // Flag that controls whether user wants to run area learning mode.
   private boolean mIsAreaLearningEnabled = false;
 
-  // Flag that controls wether user wants to load the latest ADF file.
+  // Flag that controls whether user wants to load the latest ADF file.
   private boolean mIsLoadingADF = false;
 
   // A flag to check if the Tango Service is connected. This flag avoids the
@@ -96,6 +95,12 @@ public class AreaDescriptionActivity extends Activity implements
   // Screen size for normalizing the touch input for orbiting the render camera.
   private Point mScreenSize = new Point();
 
+  // Long-running task to save an ADF.
+  private SaveAdfTask mSaveAdfTask;
+
+  // Handles the debug text UI update loop.
+  private Handler mHandler = new Handler();
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -104,13 +109,18 @@ public class AreaDescriptionActivity extends Activity implements
     queryDataFromStartActivity();
     setupUIComponents();
 
+    // Check if the Tango Core is out dated.
+    if (!CheckTangoCoreVersion(MIN_TANGO_CORE_VERSION)) {
+      Toast.makeText(this, "Tango Core out dated, please update in Play Store", 
+                     Toast.LENGTH_LONG).show();
+      finish();
+      return;
+    }
+
     // Initialize Tango Service, this function starts the communication
     // between the application and Tango Service.
     // The activity object is used for checking if the API version is outdated.
-    TangoJNINative.initialize((Activity)this);
-
-    // UI thread handles the task of updating all debug text.
-    startUIThread();
+    TangoJNINative.initialize(this);
   }
 
   @Override
@@ -118,65 +128,53 @@ public class AreaDescriptionActivity extends Activity implements
     super.onResume();
     mGLView.onResume();
 
-    // In the onResume function, we first check if the MOTION_TRACKING_PERMISSION is
-    // granted to this application, if not, we send a permission intent to
-    // the Tango Service to launch the permission activity.
-    // Note that the onPause() callback will be called once the permission 
-    // activity is foregrounded.
-    if (!Util.hasPermission(getApplicationContext(),
-                            MOTION_TRACKING_PERMISSION)) {
-      getPermission(MOTION_TRACKING_PERMISSION);
-    } else {
-      // If the requested permissions are granted to the application, we can
-      // connect to the Tango Service. For this example, we'll be calling
-      // through the JNI to the C++ code that actually interfaces with the
-      // service.
-      
-      // Setup the configuration for the TangoService, passing in our setting
-      // for the auto-recovery option.
-      TangoJNINative.setupConfig(mIsAreaLearningEnabled, mIsLoadingADF);
+    // Setup the configuration for the TangoService, passing in our setting
+    // for the auto-recovery option.
+    TangoJNINative.setupConfig(mIsAreaLearningEnabled, mIsLoadingADF);
 
-      // Connect the onPoseAvailable callback.
-      TangoJNINative.connectCallbacks();
+    // Connect the onPoseAvailable callback.
+    TangoJNINative.connectCallbacks();
 
-      // Connect to Tango Service.
-      // This function will start the Tango Service pipeline, in this case, 
-      // it will start Motion Tracking.
-      TangoJNINative.connect();
-
-      // Take the TangoCore version number from Tango Service.
+    // Connect to Tango Service (returns true on success).
+    // Starts Motion Tracking and Area Learning.
+    if (TangoJNINative.connect()) {
       mVersion.setText(TangoJNINative.getVersionNumber());
-
       // Display loaded ADF's UUID.
       mAdfUuidTextView.setText(TangoJNINative.getLoadedADFUUIDString());
 
       // Set the connected service flag to true.
       mIsConnectedService = true;
+    } else {
+      // End the activity and let the user know something went wrong.
+      Toast.makeText(this, R.string.tango_cant_initialize, Toast.LENGTH_LONG).show();
+      finish();
     }
+
+    // Start the debug text UI update loop.
+    mHandler.post(mUpdateUiLoopRunnable);
   }
 
   @Override
   protected void onPause() {
     super.onPause();
     mGLView.onPause();
-    TangoJNINative.freeContent();
+    TangoJNINative.deleteResources();
 
-    // If the service is connected, we disconnect it here.
+    // Disconnect from Tango Service, release all the resources that the app is
+    // holding from Tango Service.
     if (mIsConnectedService) {
-      mIsConnectedService = false;
-      // Disconnect from Tango Service, release all the resources that the app is
-      // holding from Tango Service.
       TangoJNINative.disconnect();
+      mIsConnectedService = false;
     }
-  }
 
+    // Stop the debug text UI update loop.
+    mHandler.removeCallbacksAndMessages(null);
+  }
+  
   @Override
   protected void onDestroy() {
     super.onDestroy();
-    if (mIsConnectedService) {
-      mIsConnectedService = false;
-      TangoJNINative.disconnect();
-    }
+    TangoJNINative.destroyActivity();
   }
 
   @Override
@@ -193,12 +191,8 @@ public class AreaDescriptionActivity extends Activity implements
         TangoJNINative.setCamera(1);
         break;
       case R.id.save_adf_button:
-        String adfName = TangoJNINative.saveAdf();
-        if (!adfName.isEmpty()) {
-          showSetNameDialog(adfName);
-        } else {
-          Toast.makeText(this, "Cannot Save ADF", Toast.LENGTH_LONG).show();
-        }
+        // Ask the user for an ADF name, then save if OK was clicked.
+        showSetADFNameDialog();
         break;
       default:
         Log.w(TAG, "Unknown button click");
@@ -231,33 +225,72 @@ public class AreaDescriptionActivity extends Activity implements
         float normalizedX1 = event.getX(1) / mScreenSize.x;
         float normalizedY1 = event.getY(1) / mScreenSize.y;
         TangoJNINative.onTouchEvent(2, event.getActionMasked(),
-            normalizedX0, normalizedY0, normalizedX1, normalizedY1);
+                normalizedX0, normalizedY0, normalizedX1, normalizedY1);
       }
     }
     return true;
   }
 
+  /**
+   * Implementation of callback listener interface in SetADFNameDialog.
+   */
   @Override
-  protected void onActivityResult (int requestCode, int resultCode, Intent data) {
-    // The result of the permission activity.
-    //
-    // Note that when the permission activity is dismissed, the
-    // MotionTrackingActivity's onResume() callback is called. As the
-    // TangoService is connected in the onResume() function, we do not call
-    // connect here.
-    if (requestCode == 0) {
-      if (resultCode == RESULT_CANCELED) {
-        mIsConnectedService = false;
-        finish();
-      }
-    }
+  public void onAdfNameOk(String adfName, String adfUuid) {
+    saveAdf(adfName);
   }
 
-  // This callback is called when save button is clicked from the
-  // SetADFNameDialog fragment.
+  /**
+   * Implementation of callback listener interface in SetADFNameDialog.
+   */
   @Override
-  public void setAdfNameAndUUID(String name, String uuid) {
-    TangoJNINative.setAdfMetadataValue(uuid, "name", name);
+  public void onAdfNameCancelled() {
+    // Continue running.
+  }
+
+  /**
+   * Save the current Area Description File.
+   * Performs saving on a background thread and displays a progress dialog.
+   */
+  private void saveAdf(String adfName) {
+    mSaveAdfTask = new SaveAdfTask(this, this, adfName);
+    mSaveAdfTask.execute();
+  }
+
+  /**
+   * Handles failed save from mSaveAdfTask.
+   */
+  @Override
+  public void onSaveAdfFailed(String adfName) {
+    String toastMessage = String.format(
+      getResources().getString(R.string.save_adf_failed_toast_format),
+      adfName);
+    Toast.makeText(this, toastMessage, Toast.LENGTH_LONG).show();
+    mSaveAdfTask = null;
+  }
+
+  /**
+   * Handles successful save from mSaveAdfTask.
+   */
+  @Override
+  public void onSaveAdfSuccess(String adfName, String adfUuid) {
+    String toastMessage = String.format(
+      getResources().getString(R.string.save_adf_success_toast_format),
+      adfName, adfUuid);
+    Toast.makeText(this, toastMessage, Toast.LENGTH_LONG).show();
+    mSaveAdfTask = null;
+    finish();
+  }
+
+  /**
+   * Updates the save progress dialog (called from area_learning_app.cc).
+   */
+  public void updateSavingAdfProgress(int progress) {
+    // Note: this method is not called from the UI thread. We read mSaveAdfTask into
+    // a local variable because the UI thread may null-out the member variable at any time.
+    SaveAdfTask saveAdfTask = mSaveAdfTask;
+    if (saveAdfTask != null) {
+      saveAdfTask.publishProgress(progress);
+    }
   }
 
   // Query user's input for the Tango Service configuration.
@@ -309,26 +342,30 @@ public class AreaDescriptionActivity extends Activity implements
     findViewById(R.id.top_down_button).setOnClickListener(this);
     findViewById(R.id.save_adf_button).setOnClickListener(this);
 
-    // Hide to save ADF button if leanring mode is off.
-    if (!mIsAreaLearningEnabled) {
+    if (mIsAreaLearningEnabled) {
+      // Disable save ADF button until Tango relocalizes to the current ADF.
+      findViewById(R.id.save_adf_button).setEnabled(false);
+    } else {
+      // Hide to save ADF button if leanring mode is off.
       findViewById(R.id.save_adf_button).setVisibility(View.GONE);
     }
 
     // OpenGL view where all of the graphics are drawn.
     mGLView = (GLSurfaceView) findViewById(R.id.gl_surface_view);
+    
+    // Configure OpenGL renderer
+    mGLView.setEGLContextClientVersion(2);
 
     // Configure OpenGL renderer
     mRenderer = new Renderer();
+    mRenderer.mAreaDescriptionActivity = this;
     mGLView.setRenderer(mRenderer);
   }
 
-  private void showSetNameDialog(String mCurrentUUID) {
+  private void showSetADFNameDialog() {
     Bundle bundle = new Bundle();
-    String name = TangoJNINative.getAdfMetadataValue(mCurrentUUID, "name");
-    if (name != null) {
-      bundle.putString("name", name);
-    }
-    bundle.putString("id", mCurrentUUID);
+    bundle.putString("name", getResources().getString(R.string.default_adf_name));
+    bundle.putString("id", ""); // UUID is generated after the ADF is saved.
 
     FragmentManager manager = getFragmentManager();
     SetADFNameDialog setADFNameDialog = new SetADFNameDialog();
@@ -336,51 +373,44 @@ public class AreaDescriptionActivity extends Activity implements
     setADFNameDialog.show(manager, "ADFNameDialog");
   }
 
-  // Call the permission intent for the Tango Service to ask for permissions.
-  // All permission types can be found here:
-  //   https://developers.google.com/project-tango/apis/c/c-user-permissions
-  private void getPermission(String permissionType) {
-    Intent intent = new Intent();
-    intent.setAction(REQUEST_PERMISSION_ACTION);
-    intent.putExtra("PERMISSIONTYPE", permissionType);
+  // Debug text UI update loop, updating at 10Hz.
+  private Runnable mUpdateUiLoopRunnable = new Runnable() {
+    public void run() {
+      updateUi();
+      mHandler.postDelayed(this, UPDATE_UI_INTERVAL_MS);
+    }
+  };
 
-    // After the permission activity is dismissed, we will receive a callback
-    // function onActivityResult() with user's result.
-    startActivityForResult(intent, 0);
-  }
+  // Update the debug text UI.
+  private void updateUi() {
+    try {
+      // Update the UI debug displays.
+      mEvent.setText(TangoJNINative.getEventString());
+      mStartServiceTDevicePoseData.setText(
+              TangoJNINative.getStartServiceTDeviceString());
+      mADFTDevicePoseData.setText(TangoJNINative.getAdfTDeviceString());
+      mADFTStartServicePoseData.setText(TangoJNINative.getAdfTStartServiceString());
 
-  // UI thread for handling debug text changes.
-  private void startUIThread() {
-    new Thread(new Runnable() {
-      @Override
-      public void run() {
-        while (true) {
-          try {
-            Thread.sleep(kUpdateIntervalMs);
-            runOnUiThread(new Runnable() {
-              @Override
-              public void run() {
-                try {
-                  updateUI();
-                } catch (Exception e) {
-                  e.printStackTrace();
-                }
-              }
-            });
-
-          } catch (Exception e) {
-            e.printStackTrace();
-          }
-        }
+      // If Tango has relocalized, allow saving the ADF.
+      // Note: Tango returns TANGO_INVALID if saveAdf() is called before relocalization.
+      if (TangoJNINative.isRelocalized()) {
+        findViewById(R.id.save_adf_button).setEnabled(true);
       }
-    }).start();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
   }
 
-  private void updateUI() {
-    mEvent.setText(TangoJNINative.getEventString());
-    mStartServiceTDevicePoseData.setText(
-        TangoJNINative.getStartServiceTDeviceString());
-    mADFTDevicePoseData.setText(TangoJNINative.getAdfTDeviceString());
-    mADFTStartServicePoseData.setText(TangoJNINative.getAdfTStartServiceString());
+  private boolean CheckTangoCoreVersion(int minVersion) {
+    int versionNumber = 0;
+    String packageName = TANGO_PACKAGE_NAME;
+    try {
+      PackageInfo pi = getApplicationContext().getPackageManager().getPackageInfo(packageName,
+          PackageManager.GET_META_DATA);
+      versionNumber = pi.versionCode;
+    } catch (NameNotFoundException e) {
+      e.printStackTrace();
+    }
+    return (minVersion <= versionNumber);
   }
 }

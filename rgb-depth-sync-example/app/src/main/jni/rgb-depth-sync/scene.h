@@ -31,14 +31,17 @@ namespace rgb_depth_sync {
 // function to draw.
 class Scene {
  public:
-  Scene(ColorImage* color_image, DepthImage* depth_image);
+  Scene();
   ~Scene();
 
   // Setup GL view port.
   void SetupViewPort(int w, int h);
 
-  // Renders the scene onto the camera image.
-  void Render();
+  // Renders the scene onto the camera image using the provided depth texture.
+  void Render(GLuint, GLuint);
+
+  // Recreate GL structures because of context creation.
+  void InitializeGL();
 
   // Set the depth texture's alpha blending value. The range is [0.0, 1.0].
   void SetDepthAlphaValue(float alpha);
@@ -47,8 +50,12 @@ class Scene {
   void SetCameraIntrinsics(const TangoCameraIntrinsics& cc_intrinsics);
 
  private:
-  GLuint screen_width_;
-  GLuint screen_height_;
+  GLint viewport_x_;
+  GLint viewport_y_;
+  GLsizei viewport_width_;
+  GLsizei viewport_height_;
+
+  float image_plane_ratio_;
 
   // The Tango world with respect to the OpenGL world matrix.
   glm::mat4 OW_T_W_;
@@ -56,10 +63,6 @@ class Scene {
   // The OpenGL camera with respect to the color camera matrix.
   glm::mat4 CC_T_OC_;
 
-  // The projection matrix of the color camera.
-  glm::mat4 projection_matrix_ar_;
-
-  tango_gl::Grid grid_;
   CameraTextureDrawable camera_texture_drawable_;
 };
 }  // namespace rgb_depth_sync

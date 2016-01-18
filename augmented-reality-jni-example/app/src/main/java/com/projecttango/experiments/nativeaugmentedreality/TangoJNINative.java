@@ -31,6 +31,9 @@ public class TangoJNINative {
   // the auto-recovery option from here.
   public static native int setupConfig();
 
+  // Signal that the activity has been destroyed and remove any cached references.
+  public static native void destroyActivity();
+
   // Connect the onPoseAvailable callback.
   public static native int connectCallbacks();
 
@@ -43,8 +46,8 @@ public class TangoJNINative {
   // holding from the Tango Service.
   public static native void disconnect();
 
-  // Release all OpenGL resources that are allocated from the program.
-  public static native void freeGLContent();
+  // Delete non-GL data structures that are allocated from the program.
+  public static native void deleteResources();
 
   // Allocate OpenGL resources for rendering.
   public static native void initGlContent();

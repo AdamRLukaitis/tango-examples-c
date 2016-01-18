@@ -89,11 +89,11 @@ class SynchronizationApplication {
   // Main Render loop.
   void Render();
 
-  // Release all OpenGL resources that are allocated in this app.
-  void FreeGLContent();
-
   // Set the transparency of Depth Image.
   void SetDepthAlphaValue(float alpha);
+
+  // Set whether to use GPU or CPU upsampling
+  void SetGPUUpsample(bool on);
 
   // Callback for point clouds that come in from the Tango service.
   //
@@ -103,13 +103,13 @@ class SynchronizationApplication {
 
  private:
   // RGB image
-  ColorImage* color_image_;
+  ColorImage color_image_;
 
   // Depth image created by projecting Point Cloud onto RGB image plane.
-  DepthImage* depth_image_;
+  DepthImage depth_image_;
 
   // Main scene which contains all the renderable objects.
-  Scene* main_scene_;
+  Scene main_scene_;
 
   // Tango configration file, this object is for configuring Tango Service setup
   // before connect to service. For example, we turn on the depth sensing in
@@ -159,6 +159,8 @@ class SynchronizationApplication {
   // point cloud buffer available and swap the shared and render buffers
   // accordingly.
   bool swap_signal;
+
+  bool gpu_upsample_;
 };
 }  // namespace rgb_depth_sync
 

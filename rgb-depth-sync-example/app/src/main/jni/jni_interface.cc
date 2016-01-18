@@ -86,15 +86,15 @@ Java_com_projecttango_experiments_rgbdepthsync_JNIInterface_render(JNIEnv*,
 }
 
 JNIEXPORT void JNICALL
-Java_com_projecttango_experiments_rgbdepthsync_JNIInterface_freeGLContent(
-    JNIEnv*, jobject) {
-  app.FreeGLContent();
+Java_com_projecttango_experiments_rgbdepthsync_JNIInterface_setDepthAlphaValue(
+    JNIEnv*, jobject, jfloat alpha) {
+  return app.SetDepthAlphaValue(alpha);
 }
 
 JNIEXPORT void JNICALL
-Java_com_projecttango_experiments_rgbdepthsync_JNIInterface_setDepthAlphaValue(
-    JNIEnv*, jobject, float alpha) {
-  return app.SetDepthAlphaValue(alpha);
+Java_com_projecttango_experiments_rgbdepthsync_JNIInterface_setGPUUpsample(
+    JNIEnv*, jobject, jboolean on) {
+  return app.SetGPUUpsample(on);
 }
 
 #ifdef __cplusplus

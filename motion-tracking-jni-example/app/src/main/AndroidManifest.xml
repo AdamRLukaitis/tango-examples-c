@@ -7,6 +7,8 @@
     <uses-sdk
         android:minSdkVersion="19"
         android:targetSdkVersion="19" />
+    
+    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
     <application
         android:allowBackup="true"
@@ -19,7 +21,7 @@
         <activity
             android:name="com.projecttango.experiments.nativemotiontracking.StartActivity"
             android:label="@string/menu_name"
-            android:screenOrientation="landscape">
+            android:screenOrientation="nosensor">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -28,7 +30,7 @@
         <activity
             android:name="com.projecttango.experiments.nativemotiontracking.MotionTrackingActivity"
             android:label="@string/menu_name" 
-            android:screenOrientation="landscape"> 
+            android:screenOrientation="nosensor"> 
         </activity>
     </application>
 
